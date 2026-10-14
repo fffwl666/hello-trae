@@ -1,0 +1,118 @@
+"""命令行待办清单：支持添加/列出/完成/删除任务，数据保存在 JSON 文件。
+
+用法：
+    python todo-cli add "买牛奶"        # 添加任务
+    python todo-cli list [--all]       # 列出任务（--all 含已完成）
+    python todo-cli done 1             # 将 1 号任务标记为完成
+    python todo-cli delete 1           # 删除 1 号任务
+"""
+
+import argparse
+import json
+import sys
+from datetime import datetime
+from pathlib import Path
+
+# 数据文件保存在脚本所在目录
+DATA_FILE = Path(__file__).with_name("todos.json")
+
+
+def load_tasks():
+    """从 JSON 文件读取任务列表；文件不存在或损坏时返回空列表。"""
+    if not DATA_FILE.exists():
+        return []
+    try:
+        return json.loads(DATA_FILE.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        print(f"警告：{DATA_FILE} 内容损坏，已从空列表重新开始")
+        return []
+
+
+def save_tasks(tasks):
+    """将任务列表写入 JSON 文件。"""
+    DATA_FILE.write_text(
+        json.dumps(tasks, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def next_id(tasks):
+    """生成不重复的任务 id（当前最大 id + 1）。"""
+    return max((t["id"] for t in tasks), default=0) + 1
+
+
+def cmd_add(args):
+    tasks = load_tasks()
+    task = {
+        "id": next_id(tasks),
+        "text": args.text,
+        "done": False,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    tasks.append(task)
+    save_tasks(tasks)
+    print(f"已添加任务 {task['id']}：{task['text']}")
+
+
+def cmd_list(args):
+    tasks = load_tasks()
+    if not args.all:
+        tasks = [t for t in tasks if not t["done"]]
+    if not tasks:
+        print("暂无任务" if args.all else "暂无未完成任务（--all 查看全部）")
+        return
+    for t in tasks:
+        mark = "[x]" if t["done"] else "[ ]"
+        print(f"{mark} {t['id']:>3}. {t['text']}  ({t['created_at']})")
+
+
+def _find_task(tasks, task_id):
+    """按 id 查找任务，找不到时打印提示并退出。"""
+    for t in tasks:
+        if t["id"] == task_id:
+            return t
+    print(f"找不到 id 为 {task_id} 的任务")
+    sys.exit(1)
+
+
+def cmd_done(args):
+    tasks = load_tasks()
+    task = _find_task(tasks, args.id)
+    task["done"] = True
+    save_tasks(tasks)
+    print(f"已完成任务 {task['id']}：{task['text']}")
+
+
+def cmd_delete(args):
+    tasks = load_tasks()
+    task = _find_task(tasks, args.id)
+    tasks.remove(task)
+    save_tasks(tasks)
+    print(f"已删除任务 {task['id']}：{task['text']}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="命令行待办清单")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_add = sub.add_parser("add", help="添加任务")
+    p_add.add_argument("text", help="任务内容")
+    p_add.set_defaults(func=cmd_add)
+
+    p_list = sub.add_parser("list", help="列出任务")
+    p_list.add_argument("--all", action="store_true", help="包含已完成任务")
+    p_list.set_defaults(func=cmd_list)
+
+    p_done = sub.add_parser("done", help="完成任务")
+    p_done.add_argument("id", type=int, help="任务 id")
+    p_done.set_defaults(func=cmd_done)
+
+    p_del = sub.add_parser("delete", help="删除任务")
+    p_del.add_argument("id", type=int, help="任务 id")
+    p_del.set_defaults(func=cmd_delete)
+
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
