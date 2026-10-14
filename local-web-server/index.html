@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>我的第一个 Web 服务器</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+      max-width: 640px;
+      margin: 60px auto;
+      padding: 0 20px;
+      color: #222;
+    }
+    h1 { font-size: 1.8rem; }
+    .card {
+      border: 1px solid #e0e0e0;
+      border-radius: 10px;
+      padding: 20px;
+      margin-top: 20px;
+    }
+    input[type="text"] {
+      padding: 8px 10px;
+      font-size: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      width: 60%;
+    }
+    button {
+      padding: 8px 16px;
+      font-size: 1rem;
+      border: none;
+      border-radius: 6px;
+      background: #2f6fed;
+      color: #fff;
+      cursor: pointer;
+    }
+    button:hover { background: #1f57c4; }
+    #result { margin-top: 14px; color: #2f6fed; min-height: 1.2em; }
+    a { color: #2f6fed; }
+  </style>
+</head>
+<body>
+  <h1>我的第一个 Web 服务器</h1>
+
+  <div class="card">
+    <p>输入你的名字，提交给 <code>/api/echo</code>：</p>
+    <form id="nameForm">
+      <input type="text" id="nameInput" placeholder="请输入名字" required>
+      <button type="submit">提交</button>
+    </form>
+    <div id="result"></div>
+  </div>
+
+  <p><a href="/api/hello">访问 /api/hello 接口 →</a></p>
+
+  <script>
+    // 表单提交：POST 名字到 /api/echo，展示服务端返回内容
+    document.getElementById("nameForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = document.getElementById("nameInput").value;
+      const res = await fetch("/api/echo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name })
+      });
+      const data = await res.json();
+      document.getElementById("result").textContent =
+        "服务器返回：" + JSON.stringify(data, null, 2);
+    });
+  </script>
+</body>
+</html>
