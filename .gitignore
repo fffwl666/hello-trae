@@ -1,0 +1,10 @@
+# 忽略 todos.json 文件
+todos.json
+
+# 忽略 weather_cache.json 文件
+weather_cache.json
+
+# 其他常见 Python/IDE 临时文件
+__pycache__/
+.idea/
+.vscode/
