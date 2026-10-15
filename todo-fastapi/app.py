@@ -1,10 +1,12 @@
 """todo-fastapi —— 待办事项 Web API（FastAPI + SQLite + Pydantic）。
 
 RESTful 接口：
-    GET    /todos        获取全部待办
-    POST   /todos        创建待办         body: {"content": "..."}
-    PATCH  /todos/{id}   更新待办         body: {"content": "...", "is_done": true}
-    DELETE /todos/{id}   删除待办
+    GET    /todos                获取全部待办
+    POST   /todos                创建待办         body: {"content": "..."}
+    PATCH  /todos/{id}           更新待办         body: {"content": "...", "is_done": true}
+    PUT    /todos/{id}           更新待办内容     body: {"content": "..."}
+    PUT    /todos/{id}/complete  设置完成状态     body: {"is_done": true}
+    DELETE /todos/{id}           删除待办
 
 前端：
     GET /                返回 static/index.html（由 StaticFiles 挂载，html=True）
@@ -22,7 +24,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 
 from database import get_connection, init_db, row_to_dict
-from models import TodoCreate, TodoResponse, TodoUpdate
+from models import TodoComplete, TodoCreate, TodoResponse, TodoUpdate
 
 # 静态资源目录（前端页面所在目录）
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -73,9 +75,13 @@ def create_todo(payload: TodoCreate):
         con.close()
 
 
+@app.put("/todos/{todo_id}", response_model=TodoResponse, summary="更新待办（编辑内容）")
 @app.patch("/todos/{todo_id}", response_model=TodoResponse, summary="更新待办")
 def update_todo(todo_id: int, payload: TodoUpdate):
-    """更新待办内容或完成状态；只更新 body 中提供的字段，不存在则返回 404。"""
+    """更新待办内容或完成状态；只更新 body 中提供的字段，不存在则返回 404。
+
+    PUT 与 PATCH 共用本处理函数：前端「编辑」保存走 PUT，旧接口 PATCH 仍保留。
+    """
     con = get_connection()
     try:
         row = con.execute(f"{SELECT_FIELDS} WHERE id = ?", (todo_id,)).fetchone()
@@ -94,6 +100,25 @@ def update_todo(todo_id: int, payload: TodoUpdate):
         )
         con.commit()
 
+        updated = con.execute(f"{SELECT_FIELDS} WHERE id = ?", (todo_id,)).fetchone()
+        return row_to_dict(updated)
+    finally:
+        con.close()
+
+
+@app.put("/todos/{todo_id}/complete", response_model=TodoResponse, summary="设置完成状态")
+def complete_todo(todo_id: int, payload: TodoComplete):
+    """设置待办的完成状态（勾选/取消勾选），写入数据库后返回最新待办；不存在返回 404。"""
+    con = get_connection()
+    try:
+        row = con.execute(f"{SELECT_FIELDS} WHERE id = ?", (todo_id,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"待办 {todo_id} 不存在")
+        con.execute(
+            "UPDATE todos SET is_done = ? WHERE id = ?",
+            (int(payload.is_done), todo_id),
+        )
+        con.commit()
         updated = con.execute(f"{SELECT_FIELDS} WHERE id = ?", (todo_id,)).fetchone()
         return row_to_dict(updated)
     finally:

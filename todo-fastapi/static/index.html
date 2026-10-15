@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>待办事项 · todo-fastapi</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 40px 16px;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+      /* 浅蓝 → 浅紫 渐变背景 */
+      background: linear-gradient(135deg, #e0ecff 0%, #f0e0ff 100%);
+      color: #23272f;
+    }
+    .container { max-width: 640px; margin: 0 auto; }
+    h1 { margin: 0; font-size: 1.9rem; }
+    .subtitle { margin: 6px 0 24px; color: #7a88aa; font-size: 0.9rem; }
+    .add-form { display: flex; gap: 10px; margin-bottom: 24px; }
+    .add-form input {
+      flex: 1; padding: 12px 14px; font-size: 1rem;
+      border: 1px solid #dfe3ea; border-radius: 10px; outline: none;
+      transition: box-shadow .15s ease, border-color .15s ease;
+      background: rgba(255,255,255,.85);
+    }
+    .add-form input:focus { border-color: #2f6fed; box-shadow: 0 0 0 3px rgba(47,111,237,.18); }
+    .add-form button {
+      padding: 12px 22px; font-size: 1rem; border: none;
+      border-radius: 10px; background: #2f6fed; color: #fff; cursor: pointer;
+      box-shadow: 0 3px 10px rgba(47,111,237,.35);
+      transition: box-shadow .12s ease, transform .08s ease, background .12s ease;
+    }
+    .add-form button:hover { background: #1f57c4; box-shadow: 0 4px 14px rgba(47,111,237,.45); }
+    /* 按压效果：缩小 + 阴影变浅 */
+    .add-form button:active {
+      transform: translateY(1px) scale(.98);
+      box-shadow: 0 1px 4px rgba(47,111,237,.3);
+    }
+    .todo-card {
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 16px; margin-bottom: 12px;
+      background: rgba(255,255,255,.95); border: 1px solid rgba(220,225,235,.8);
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(80,100,180,.08);
+      transition: transform .15s ease, box-shadow .15s ease;
+    }
+    /* 悬停上浮 */
+    .todo-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 18px rgba(80,100,180,.14);
+    }
+    .seq { width: 26px; text-align: center; font-size: .85rem; color: #a2aab8; }
+    .toggle { width: 18px; height: 18px; cursor: pointer; accent-color: #2f6fed; }
+    .content { flex: 1; min-width: 0; }
+    .text { font-size: 1rem; word-break: break-word; }
+    .time { margin-top: 4px; font-size: .78rem; color: #a2aab8; }
+    .delete {
+      padding: 6px 12px; font-size: .85rem; border: 1px solid #f0c4c4;
+      border-radius: 8px; background: #fff; color: #d9534f; cursor: pointer;
+      transition: background .12s ease, color .12s ease, border-color .12s ease, transform .08s ease;
+    }
+    .delete:hover { background: #d9534f; color: #fff; border-color: #d9534f; }
+    .delete:active { transform: scale(.95); }
+    .todo-card.done { opacity: .6; }
+    .todo-card.done .text { text-decoration: line-through; color: #8a93a3; }
+    .empty {
+      padding: 30px; text-align: center; color: #a2aab8;
+      background: rgba(255,255,255,.85); border: 1px dashed #b0c4ee; border-radius: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>待办事项</h1>
+    <p class="subtitle">FastAPI + SQLite + Pydantic · <a href="/docs">API 文档</a></p>
+
+    <!-- 添加待办：JS 拦截提交，fetch 调 POST /todos -->
+    <form class="add-form" id="addForm">
+      <input type="text" id="contentInput" placeholder="输入新的待办事项…" autocomplete="off" required>
+      <button type="submit">添加</button>
+    </form>
+
+    <div class="todo-list" id="todoList"></div>
+  </div>
+
+  <script>
+    // ================= 前端交互：全部通过 fetch 调用 REST 接口 =================
+    const API = "/todos";
+    const listEl = document.getElementById("todoList");
+
+    // 编辑相关按钮的内联样式：遵守「不动 CSS」的约束，样式随元素在 JS 中生成
+    const BTN_BASE = "padding:6px 12px;font-size:.85rem;border-radius:8px;cursor:pointer;white-space:nowrap;";
+    const BTN_EDIT = BTN_BASE + "border:1px solid #c9d8ff;background:#fff;color:#2f6fed;";
+    const BTN_SAVE = BTN_BASE + "border:1px solid #2f6fed;background:#2f6fed;color:#fff;";
+    const BTN_CANCEL = BTN_BASE + "border:1px solid #dfe3ea;background:#fff;color:#5b6472;";
+
+    // 渲染列表：拼出每条待办的卡片 HTML
+    function render(todos) {
+      if (!todos.length) {
+        listEl.innerHTML = '<div class="empty">还没有待办事项，赶快添加一条吧～</div>';
+        return;
+      }
+      listEl.innerHTML = todos.map((t, i) => `
+        <div class="todo-card ${t.is_done ? "done" : ""}" data-id="${t.id}">
+          <span class="seq">${i + 1}</span>
+          <input type="checkbox" class="toggle" ${t.is_done ? "checked" : ""}>
+          <div class="content">
+            <div class="text">${escapeHtml(t.content)}</div>
+            <div class="time">创建于 ${t.created_at}</div>
+          </div>
+          <button class="edit" style="${BTN_EDIT}">编辑</button>
+          <button class="delete">删除</button>
+        </div>`).join("");
+    }
+
+    // 简单的 HTML 转义，防止内容注入
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    // GET /todos —— 拉取并渲染全部待办
+    async function load() {
+      const res = await fetch(API);
+      render(await res.json());
+    }
+
+    // POST /todos —— 创建待办，成功后重新拉取列表
+    document.getElementById("addForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const input = document.getElementById("contentInput");
+      const content = input.value.trim();
+      if (!content) return;
+      const res = await fetch(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content })
+      });
+      if (res.ok) { input.value = ""; await load(); }
+    });
+
+    // 勾选/取消：调用新接口 PUT /todos/{id}/complete，把目标状态写入数据库（刷新后保持）
+    listEl.addEventListener("change", async (e) => {
+      if (!e.target.classList.contains("toggle")) return;
+      const card = e.target.closest(".todo-card");
+      const id = card.dataset.id;
+      const res = await fetch(`${API}/${id}/complete`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_done: e.target.checked })
+      });
+      if (res.ok) card.classList.toggle("done", e.target.checked);
+    });
+
+    // 进入编辑态：只把 .text 换成输入框，卡片与勾选状态保持不变
+    function enterEdit(card) {
+      const textEl = card.querySelector(".text");
+      card.dataset.original = textEl.textContent; // 记住原内容，取消时还原
+
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "edit-input";
+      input.value = textEl.textContent;
+      input.style.cssText = "width:100%;box-sizing:border-box;padding:8px 10px;font-size:1rem;border:1px solid #dfe3ea;border-radius:8px;outline:none;background:#fff;";
+      textEl.replaceWith(input);
+
+      // 隐藏「编辑」「删除」，在右侧追加「保存」「取消」（仍是 .todo-card 的直接子元素，沿用原有间距）
+      card.querySelector(".edit").hidden = true;
+      card.querySelector(".delete").hidden = true;
+      const save = document.createElement("button");
+      save.className = "save";
+      save.textContent = "保存";
+      save.style.cssText = BTN_SAVE;
+      const cancel = document.createElement("button");
+      cancel.className = "cancel";
+      cancel.textContent = "取消";
+      cancel.style.cssText = BTN_CANCEL;
+      card.append(save, cancel);
+
+      input.focus();
+      input.select();
+    }
+
+    // 退出编辑态：还原为文本、移除「保存/取消」、恢复「编辑/删除」
+    function exitEdit(card) {
+      const input = card.querySelector(".edit-input");
+      if (input) {
+        const text = document.createElement("div");
+        text.className = "text";
+        text.textContent = card.dataset.original || "";
+        input.replaceWith(text);
+      }
+      card.querySelector(".edit").hidden = false;
+      card.querySelector(".delete").hidden = false;
+      card.querySelector(".save")?.remove();
+      card.querySelector(".cancel")?.remove();
+    }
+
+    // 事件委托：编辑（PUT /todos/{id}）、删除（DELETE /todos/{id}）
+    listEl.addEventListener("click", async (e) => {
+      const card = e.target.closest(".todo-card");
+      if (!card) return;
+
+      // 删除
+      if (e.target.classList.contains("delete")) {
+        if (!confirm("确定删除这条待办吗？")) return;
+        const res = await fetch(`${API}/${card.dataset.id}`, { method: "DELETE" });
+        if (res.ok) await load(); // 重新拉取以刷新序号
+        return;
+      }
+
+      // 进入编辑
+      if (e.target.classList.contains("edit")) {
+        enterEdit(card);
+        return;
+      }
+
+      // 保存编辑：PUT /todos/{id} 更新内容
+      if (e.target.classList.contains("save")) {
+        const input = card.querySelector(".edit-input");
+        const content = input.value.trim();
+        if (!content) return; // 空内容不提交
+        const res = await fetch(`${API}/${card.dataset.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content })
+        });
+        if (res.ok) await load(); // 保存成功重新拉取列表
+        return;
+      }
+
+      // 取消编辑
+      if (e.target.classList.contains("cancel")) {
+        exitEdit(card);
+      }
+    });
+
+    load(); // 页面加载时初始化
+  </script>
+</body>
+</html>
